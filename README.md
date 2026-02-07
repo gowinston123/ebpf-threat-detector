@@ -38,3 +38,7 @@ sudo ./bin/ebpf-threat-detector
 └── pkg/
     └── events/       # Event types and parsing
 ```
+
+
+## References
+https://github.com/cilium/cilium
