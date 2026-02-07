@@ -23,3 +23,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Test files
+this-is-a-very-long-filename-to-test-comm-limit
