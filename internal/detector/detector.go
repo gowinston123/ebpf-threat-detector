@@ -100,7 +100,7 @@ func (d *Detector) analyzeEvent(event *events.Event) {
 }
 
 func (d *Detector) shouldIgnore(event *events.Event) bool {
-	comm := event.GetComm()
+	comm := event.GetEffectiveComm()
 	for _, ignored := range d.config.Rules.Process.IgnoreComm {
 		if comm == ignored {
 			return true

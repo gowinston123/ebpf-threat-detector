@@ -2,6 +2,7 @@ package events
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 )
 
@@ -19,6 +20,7 @@ type Event struct {
 	UID       uint32
 	GID       uint32
 	EventType uint32
+	Pad       uint32   // explicit padding for 8-byte alignment
 	Timestamp uint64
 	Comm      [16]byte
 	Filename  [256]byte
@@ -42,6 +44,19 @@ func (e *Event) GetFilename() string {
 		}
 	}
 	return string(e.Filename[:])
+}
+
+// GetEffectiveComm returns the untruncated command name.
+// For execve events, it derives the name from the full filename path
+// since bpf_get_current_comm() truncates at 15 characters (TASK_COMM_LEN).
+// For other event types, it falls back to the kernel comm field.
+func (e *Event) GetEffectiveComm() string {
+	if e.EventType == EventExecve {
+		if filename := e.GetFilename(); filename != "" {
+			return filepath.Base(filename)
+		}
+	}
+	return e.GetComm()
 }
 
 // GetEventTypeName returns human-readable event type
@@ -70,7 +85,7 @@ func (e *Event) String() string {
 		e.GetEventTypeName(),
 		e.PID,
 		e.UID,
-		e.GetComm(),
+		e.GetEffectiveComm(),
 		e.GetFilename(),
 	)
 }

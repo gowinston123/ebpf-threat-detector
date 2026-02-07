@@ -22,6 +22,7 @@ struct event {
     __u32 uid;
     __u32 gid;
     __u32 event_type;
+    __u32 _pad;           // explicit padding for 8-byte alignment
     __u64 timestamp;
     char comm[TASK_COMM_LEN];
     char filename[MAX_FILENAME_LEN];
@@ -60,13 +61,23 @@ int trace_execve(struct syscall_trace_enter *ctx) {
     e->uid = uid_gid & 0xFFFFFFFF;
     e->gid = uid_gid >> 32;
     e->event_type = EVENT_EXECVE;
+    e->_pad = 0;
     e->timestamp = bpf_ktime_get_ns();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
+    // Initialize filename buffer
+    e->filename[0] = '\0';
+
     // Read filename from syscall argument
-    const char *filename = (const char *)ctx->args[0];
-    bpf_probe_read_user_str(&e->filename, sizeof(e->filename), filename);
+    const char *filename_ptr = (const char *)ctx->args[0];
+    if (filename_ptr) {
+        long ret = bpf_probe_read_user_str(&e->filename, sizeof(e->filename), filename_ptr);
+        if (ret < 0) {
+            // Try kernel memory if user read fails (some edge cases)
+            bpf_probe_read_kernel_str(&e->filename, sizeof(e->filename), filename_ptr);
+        }
+    }
 
     bpf_ringbuf_submit(e, 0);
     return 0;
@@ -90,6 +101,7 @@ int trace_setuid(struct syscall_trace_enter *ctx) {
     e->uid = uid_gid & 0xFFFFFFFF;
     e->gid = uid_gid >> 32;
     e->event_type = EVENT_SETUID;
+    e->_pad = 0;
     e->timestamp = bpf_ktime_get_ns();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
@@ -117,6 +129,7 @@ int trace_setgid(struct syscall_trace_enter *ctx) {
     e->uid = uid_gid & 0xFFFFFFFF;
     e->gid = uid_gid >> 32;
     e->event_type = EVENT_SETGID;
+    e->_pad = 0;
     e->timestamp = bpf_ktime_get_ns();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
