@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/leemingi/ebpf-threat-detector/internal/config"
 	"github.com/leemingi/ebpf-threat-detector/internal/loader"
 	"github.com/leemingi/ebpf-threat-detector/pkg/events"
 )
@@ -18,11 +19,12 @@ type ThreatCallback func(event *events.Event, reason string)
 // Detector monitors system events and detects threats
 type Detector struct {
 	loader   *loader.Loader
+	config   *config.Config
 	callback ThreatCallback
 }
 
 // New creates a new threat detector
-func New(callback ThreatCallback) (*Detector, error) {
+func New(cfg *config.Config, callback ThreatCallback) (*Detector, error) {
 	l, err := loader.New()
 	if err != nil {
 		return nil, fmt.Errorf("creating loader: %w", err)
@@ -30,6 +32,7 @@ func New(callback ThreatCallback) (*Detector, error) {
 
 	return &Detector{
 		loader:   l,
+		config:   cfg,
 		callback: callback,
 	}, nil
 }
@@ -75,32 +78,50 @@ func (d *Detector) Start(ctx context.Context) error {
 
 // analyzeEvent checks if an event is a potential threat
 func (d *Detector) analyzeEvent(event *events.Event) {
+	// Check if process should be ignored
+	if d.shouldIgnore(event) {
+		return
+	}
+
 	switch event.EventType {
 	case events.EventExecve:
-		d.analyzeExecve(event)
+		if d.config.Rules.Execve.Enabled {
+			d.analyzeExecve(event)
+		}
 	case events.EventSetuid:
-		d.analyzeSetuid(event)
+		if d.config.Rules.PrivilegeEscalation.MonitorSetuid {
+			d.analyzeSetuid(event)
+		}
 	case events.EventSetgid:
-		d.analyzeSetgid(event)
+		if d.config.Rules.PrivilegeEscalation.MonitorSetgid {
+			d.analyzeSetgid(event)
+		}
 	}
+}
+
+func (d *Detector) shouldIgnore(event *events.Event) bool {
+	comm := event.GetComm()
+	for _, ignored := range d.config.Rules.Process.IgnoreComm {
+		if comm == ignored {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Detector) analyzeExecve(event *events.Event) {
 	filename := event.GetFilename()
 
-	// Check for suspicious binaries
-	suspiciousBinaries := []string{
-		"/bin/sh", "/bin/bash", "/bin/nc", "/usr/bin/nc",
-		"/bin/netcat", "/usr/bin/wget", "/usr/bin/curl",
-	}
-
-	for _, bin := range suspiciousBinaries {
-		if filename == bin && event.UID != 0 {
-			log.Printf("[ALERT] Suspicious exec: %s", event)
-			if d.callback != nil {
-				d.callback(event, fmt.Sprintf("Suspicious binary execution: %s", filename))
+	// Check against configured suspicious binaries
+	for _, bin := range d.config.Rules.Execve.SuspiciousBinaries {
+		if filename == bin {
+			if d.config.Rules.Execve.AlertNonRoot && event.UID != 0 {
+				log.Printf("[ALERT] Suspicious exec: %s", event)
+				if d.callback != nil {
+					d.callback(event, fmt.Sprintf("Suspicious binary execution: %s", filename))
+				}
+				return
 			}
-			return
 		}
 	}
 
@@ -108,7 +129,6 @@ func (d *Detector) analyzeExecve(event *events.Event) {
 }
 
 func (d *Detector) analyzeSetuid(event *events.Event) {
-	// Alert on any setuid call from non-root
 	if event.UID != 0 {
 		log.Printf("[ALERT] Privilege escalation attempt: %s", event)
 		if d.callback != nil {

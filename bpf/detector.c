@@ -1,7 +1,6 @@
 //go:build ignore
 
 #include <linux/bpf.h>
-#include <linux/ptrace.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
@@ -33,9 +32,19 @@ struct {
     __uint(max_entries, 256 * 1024);
 } events SEC(".maps");
 
+// Tracepoint context for sys_enter
+struct syscall_trace_enter {
+    unsigned short common_type;
+    unsigned char common_flags;
+    unsigned char common_preempt_count;
+    int common_pid;
+    long syscall_nr;
+    unsigned long args[6];
+};
+
 // Track execve syscalls
 SEC("tracepoint/syscalls/sys_enter_execve")
-int trace_execve(struct trace_event_raw_sys_enter *ctx) {
+int trace_execve(struct syscall_trace_enter *ctx) {
     struct event *e;
 
     e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
@@ -47,7 +56,7 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx) {
     __u64 uid_gid = bpf_get_current_uid_gid();
 
     e->pid = pid_tgid >> 32;
-    e->ppid = 0; // Will be filled in userspace
+    e->ppid = 0;
     e->uid = uid_gid & 0xFFFFFFFF;
     e->gid = uid_gid >> 32;
     e->event_type = EVENT_EXECVE;
@@ -65,7 +74,7 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx) {
 
 // Track setuid syscalls (privilege escalation detection)
 SEC("tracepoint/syscalls/sys_enter_setuid")
-int trace_setuid(struct trace_event_raw_sys_enter *ctx) {
+int trace_setuid(struct syscall_trace_enter *ctx) {
     struct event *e;
 
     e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
@@ -92,7 +101,7 @@ int trace_setuid(struct trace_event_raw_sys_enter *ctx) {
 
 // Track setgid syscalls
 SEC("tracepoint/syscalls/sys_enter_setgid")
-int trace_setgid(struct trace_event_raw_sys_enter *ctx) {
+int trace_setgid(struct syscall_trace_enter *ctx) {
     struct event *e;
 
     e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);

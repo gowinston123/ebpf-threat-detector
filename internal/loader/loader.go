@@ -8,7 +8,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64 -type event detector ../../bpf/detector.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target arm64 detector ../../bpf/detector.c
 
 // Loader manages eBPF program lifecycle
 type Loader struct {
